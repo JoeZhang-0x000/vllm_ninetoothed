@@ -10,6 +10,18 @@ from vllm.platforms import current_platform
 
 logger = init_logger(__name__)
 
+import os
+
+CUSTOM_OP = os.getenv("CUSTOM_OP", "auto")
+
+
+def _log(info: str):
+    """Custom debug info"""
+    logger.info_once(f"\033[91m{info}\033[0m")
+
+
+_log(f"Custom op: {CUSTOM_OP}")
+
 
 class CustomOp(nn.Module):
     """
@@ -80,7 +92,7 @@ class CustomOp(nn.Module):
         # PyTorch-native implementation.
         return self.forward_native(*args, **kwargs)
 
-    def dispatch_forward(self):
+    def _dispatch_forward(self):
         # NOTE(woosuk): Here we assume that vLLM was built for only one
         # specific backend. Currently, we do not support dynamic dispatching.
         compilation_config = get_cached_compilation_config()
@@ -105,6 +117,16 @@ class CustomOp(nn.Module):
             return self.forward_oot
         else:
             return self.forward_cuda
+
+    def dispatch_forward(self):
+        if CUSTOM_OP == "auto":
+            if hasattr(self, "forward_ninetoothed"):
+                _log("using ninetoothed backend")
+                return self.forward_ninetoothed
+            else:
+                return self._dispatch_forward()
+        else:
+            return self._dispatch_forward()
 
     @classmethod
     def enabled(cls) -> bool:

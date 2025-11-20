@@ -41,9 +41,10 @@ def fused_add_rms_norm(
     from vllm import _custom_ops as ops
 
     if vllm_is_batch_invariant():
-        return rms_norm_batch_invariant(
-            x + residual, weight, variance_epsilon
-        ), x + residual
+        return (
+            rms_norm_batch_invariant(x + residual, weight, variance_epsilon),
+            x + residual,
+        )
     ops.fused_add_rms_norm(
         x,
         residual,
@@ -173,6 +174,21 @@ class RMSNorm(CustomOp):
             return x
         else:
             return x, residual
+
+    def forward_ninetoothed(
+        self,
+        x: torch.Tensor,
+        residual: torch.Tensor | None = None,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        """Ninetoothed implementation rms norm."""
+        from vllm.model_executor.layers.ninetoothed_ops.rms_norm import forward_nt
+
+        return forward_nt(
+            x,
+            weight=self.weight.data if self.has_weight else None,
+            residual=residual,
+            eps=self.variance_epsilon,
+        )
 
     def forward_native(
         self,
@@ -314,9 +330,7 @@ class GemmaRMSNorm(CustomOp):
             return self.forward_native(x, residual)
 
         if not getattr(self, "_is_compiled", False):
-            self.forward_static = torch.compile(  # type: ignore
-                self.forward_static
-            )
+            self.forward_static = torch.compile(self.forward_static)  # type: ignore
             self._is_compiled = True
         return self.forward_native(x, residual)
 
